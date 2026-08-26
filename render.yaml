@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: alpaca-trading-app
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    envVars:
+      - key: APCA_API_KEY_ID
+        sync: false
+      - key: APCA_API_SECRET_KEY
+        sync: false
+      - key: ALPACA_STOCK_FEED
+        value: iex
+      - key: PORT
+        value: 3000
+      - key: STARTING_PAPER_BALANCE
+        value: 10000
+      - key: MAX_RISK_PER_TRADE_PCT
+        value: 1.0
+      - key: MAX_DAILY_LOSS_PCT
+        value: 3.0
+      - key: MAX_PORTFOLIO_EXPOSURE_PCT
+        value: 50.0
+      - key: MAX_OPEN_POSITIONS
+        value: 5
+      - key: DB_PATH
+        value: /app/data/trading.sqlite
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
