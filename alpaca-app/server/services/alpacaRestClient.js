@@ -1,4 +1,5 @@
 "use strict";
+const { rateLimitedFetch } = require("./rateLimiter.js");
 
 /**
  * Alpaca REST market-data client (historical bars). Auth via headers, never query params,
@@ -28,7 +29,7 @@ class AlpacaRestClient {
     }
     let res;
     try {
-      res = await fetch(url.toString(), { headers: this._headers() });
+            res = await rateLimitedFetch(url.toString(), { headers: this._headers() });
     } catch (e) {
       throw new Error(`Could not reach Alpaca (network error): ${e.message}`);
     }
