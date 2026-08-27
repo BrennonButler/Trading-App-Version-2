@@ -9,7 +9,12 @@ const config = require("./config.js");
 const { initDb } = require("./services/db.js");
 const { MarketDataService } = require("./services/marketDataService.js");
 const { AlpacaRestClient } = require("./services/alpacaRestClient.js");
+const { AlpacaAssetsClient } = require("./services/alpacaAssetsClient.js");
+const { AlpacaScreenerClient } = require("./services/alpacaScreenerClient.js");
 const { analyzeSymbol } = require("./services/analyst.js");
+const { extractSymbol, extractComparisonSymbol, buildAnalysisPayload, isMarketOverviewRequest, buildMarketOverviewPayload } = require("./services/analysisPayload.js");
+const { runAnalysis } = require("./services/aiReasoningEngine.js");
+const { AlpacaNewsClient } = require("./services/alpacaNewsClient.js");
 const {
   createInitialState, getOpenPositions, getPortfolioValue, openPosition, closePosition, checkStopsAndTargets, RiskLimitExceeded,
 } = require("./lib/paper_trading_engine.js");
@@ -24,6 +29,11 @@ function createApp({ dbPath, stockWsUrls, cryptoWsUrl } = {}) {
 
   const db = initDb(dbPath || config.dbPath);
   const restClient = new AlpacaRestClient({ keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
+  const assetsClient = new AlpacaAssetsClient({ keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
+  const screenerClient = new AlpacaScreenerClient({ keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
+  const newsClient = new AlpacaNewsClient({ keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
+  // Per-session chat memory: sessionId -> { lastSymbol, lastAssetType, history: [] }
+  const chatSessions = new Map();
   const marketData = new MarketDataService({
     keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey,
     stockFeed: config.alpaca.stockFeed, maxSubscriptionsPerClient: config.maxSubscriptionsPerClient,
@@ -86,6 +96,125 @@ function createApp({ dbPath, stockWsUrls, cryptoWsUrl } = {}) {
       });
       res.json({ symbol, assetType, bars });
     } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  // Symbol autocomplete/search - backed by Alpaca's real, full list of tradable US stocks
+  // (thousands, not a hardcoded subset), so typing any real ticker or company name gets
+  // live feedback rather than only working for a small pre-set watchlist.
+  app.get("/api/symbols/search", async (req, res) => {
+    const q = (req.query.q || "").trim();
+    if (!q) return res.json({ results: [] });
+    try {
+      const results = await assetsClient.search(q, parseInt(req.query.limit || "8", 10));
+      res.json({ results });
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  // Real, live "what's actually being traded right now" from Alpaca's own screener - not
+  // derived by us scanning the whole market. This is the fast, no-manual-effort default:
+  // a small, real pool the existing signal engine can then evaluate in well under a minute.
+  app.get("/api/symbols/trending", async (req, res) => {
+    try {
+      const [actives, gainers] = await Promise.all([
+        screenerClient.getMostActive(30).catch((e) => { console.warn("most-actives failed:", e.message); return []; }),
+        screenerClient.getTopGainers(20).catch((e) => { console.warn("top gainers failed:", e.message); return []; }),
+      ]);
+      const seen = new Set();
+      const symbols = [];
+      for (const a of [...actives, ...gainers]) {
+        if (!seen.has(a.symbol)) { seen.add(a.symbol); symbols.push(a.symbol); }
+      }
+      if (!symbols.length) return res.status(502).json({ error: "Could not reach Alpaca's screener - both most-actives and movers requests failed." });
+      res.json({ count: symbols.length, symbols });
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  // Real, verifiable exchange listings from Alpaca's own asset data - not a fabricated or
+  // stale "S&P 500 list" from somewhere else. exchanges=NYSE,NASDAQ (comma-separated) or
+  // omit for everything Alpaca lists as tradable (includes OTC/smaller venues).
+  app.get("/api/symbols/universe", async (req, res) => {
+    try {
+      const all = await assetsClient.getAllAssets();
+      const exchangeFilter = (req.query.exchanges || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+      const filtered = exchangeFilter.length ? all.filter((a) => exchangeFilter.includes((a.exchange || "").toUpperCase())) : all;
+      res.json({ count: filtered.length, symbols: filtered.map((a) => a.symbol) });
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
+  });
+
+  // ============================================================
+  // AI Trade Analyst chat route
+  // ============================================================
+  app.post("/api/analyst/chat", async (req, res) => {
+    const { message, sessionId = "default", horizon = "short_term" } = req.body || {};
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    let session = chatSessions.get(sessionId);
+    if (!session) { session = { lastSymbol: null, lastAssetType: null, history: [] }; chatSessions.set(sessionId, session); }
+
+    const primary = extractSymbol(message, { lastSymbol: session.lastSymbol, lastAssetType: session.lastAssetType });
+
+    if (!primary) {
+      if (isMarketOverviewRequest(message)) {
+        try {
+          const payload = await buildMarketOverviewPayload({ restClient, newsClient, feed: config.alpaca.stockFeed, horizon });
+          const { reply } = await runAnalysis({
+            payload, userQuestion: message, conversationHistory: session.history, horizon,
+            apiKey: config.anthropic.apiKey, model: config.anthropic.model,
+          });
+          session.history.push({ role: "user", content: message }, { role: "assistant", content: reply });
+          if (session.history.length > 20) session.history = session.history.slice(-20);
+          return res.json({ reply, symbol: null, payload, isMarketOverview: true });
+        } catch (e) {
+          db.log("ERROR", "analyst", `Market overview failed: ${e.message}`);
+          return res.status(502).json({ error: e.message });
+        }
+      }
+      return res.json({
+        reply: "I don't have a symbol to analyze yet - tell me a stock ticker, ETF, or crypto pair (e.g. \"Analyze NVDA\" or \"Is BTC/USD bullish?\"), or ask about the market overall.",
+        symbol: null, payload: null,
+      });
+    }
+
+    const isComparison = /\b(compare|vs\.?|versus)\b/i.test(message);
+    const secondSymbol = isComparison ? extractComparisonSymbol(message, primary.symbol) : null;
+
+    try {
+      const payloadOpts = { restClient, newsClient, feed: config.alpaca.stockFeed, horizon };
+      const primaryPayload = await buildAnalysisPayload({ symbol: primary.symbol, assetType: primary.assetType, indexNote: primary.indexNote, ...payloadOpts });
+
+      let payload = primaryPayload;
+      if (secondSymbol) {
+        // Comparison mode: build both payloads, hand the model both, let it reason about
+        // which currently has stronger evidence rather than us picking programmatically.
+        const secondAssetType = secondSymbol.includes("/") ? "crypto" : "stock";
+        const secondPayload = await buildAnalysisPayload({ symbol: secondSymbol, assetType: secondAssetType, ...payloadOpts });
+        payload = { comparison: true, assetA: primaryPayload, assetB: secondPayload };
+      }
+
+      const { reply } = await runAnalysis({
+        payload, userQuestion: message, conversationHistory: session.history, horizon,
+        apiKey: config.anthropic.apiKey, model: config.anthropic.model,
+      });
+
+      session.lastSymbol = primary.symbol;
+      session.lastAssetType = primary.assetType;
+      session.history.push({ role: "user", content: message }, { role: "assistant", content: reply });
+      if (session.history.length > 20) session.history = session.history.slice(-20); // bounded memory
+
+      db.log("INFO", "analyst", `Chat analysis for ${primary.symbol} (${horizon})`);
+      res.json({ reply, symbol: primary.symbol, assetType: primary.assetType, horizon, payload, symbolSource: primary.source });
+    } catch (e) {
+      db.log("ERROR", "analyst", `Chat analysis failed: ${e.message}`);
       res.status(502).json({ error: e.message });
     }
   });
