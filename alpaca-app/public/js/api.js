@@ -31,6 +31,8 @@ const API = {
     return this.get(`/historical/${assetType}/${encodeURIComponent(symbol)}${q ? '?' + q : ''}`);
   },
   snapshot(assetType, symbol) { return this.get(`/snapshot/${assetType}/${encodeURIComponent(symbol)}`); },
+  searchSymbols(q, limit) { return this.get(`/symbols/search?q=${encodeURIComponent(q)}&limit=${limit || 8}`); },
+  analystChat(message, sessionId, horizon) { return this.post('/analyst/chat', { message, sessionId, horizon }); },
 };
 
 // Live WebSocket connection to our own backend (/ws), which fans out data from the ONE
