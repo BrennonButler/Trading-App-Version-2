@@ -9,7 +9,7 @@ const App = {
   watchlistData: {}, // "assetType:symbol" -> latest snapshot message
 };
 
-const PAGE_TITLES = { watchlist: 'Live Watchlist', allocator: 'Put Money In', scanner: 'Scanner', portfolio: 'Portfolio', history: 'Trade History', backtest: 'Backtesting', settings: 'Settings' };
+const PAGE_TITLES = { watchlist: 'Live Watchlist', analyst: 'AI Trade Analyst', allocator: 'Put Money In', scanner: 'Scanner', portfolio: 'Portfolio', history: 'Trade History', backtest: 'Backtesting', settings: 'Settings' };
 const PAGE_RENDERERS = {};
 
 function switchTab(tab) {
