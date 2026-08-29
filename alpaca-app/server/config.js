@@ -15,6 +15,10 @@ module.exports = {
     secretKey: process.env.APCA_API_SECRET_KEY || "",
     stockFeed: VALID_STOCK_FEEDS.includes(stockFeed) ? stockFeed : "iex",
   },
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY || "",
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
+  },
   maxSubscriptionsPerClient: parseInt(process.env.MAX_SUBSCRIPTIONS_PER_CLIENT || "30", 10),
   dbPath: process.env.DB_PATH || undefined,
   startingPaperBalance: parseFloat(process.env.STARTING_PAPER_BALANCE || "10000"),
