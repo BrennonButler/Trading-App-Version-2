@@ -29,7 +29,7 @@ class AlpacaRestClient {
     }
     let res;
     try {
-            res = await rateLimitedFetch(url.toString(), { headers: this._headers() });
+      res = await rateLimitedFetch(url.toString(), { headers: this._headers() });
     } catch (e) {
       throw new Error(`Could not reach Alpaca (network error): ${e.message}`);
     }
@@ -48,14 +48,37 @@ class AlpacaRestClient {
    *   volume, timestamp, timeframe, source:'alpaca', feed }]
    */
   async getHistoricalBars({ symbol, assetType, timeframe = "1Day", start, end, limit = 300, feed = "iex" }) {
+    // Alpaca's bars endpoint can return an empty result when no start is given and "now"
+    // falls on a non-trading window (e.g. a weekend, or after-hours before any bar has
+    // formed) - it does not automatically walk backward to find the most recent real
+    // trading data. Always supply an explicit, generous start so real bars are found
+    // regardless of what day/time it currently is. This does not risk returning MORE
+    // than asked for - Alpaca still respects `limit` as a hard cap.
+    const effectiveStart = start || this._computeDefaultStart(timeframe, limit, assetType);
     if (assetType === "crypto") {
-      const data = await this._get("/v1beta3/crypto/us/bars", { symbols: symbol, timeframe, start, end, limit });
+      const data = await this._get("/v1beta3/crypto/us/bars", { symbols: symbol, timeframe, start: effectiveStart, end, limit });
       const raw = (data.bars && data.bars[symbol]) || [];
       return raw.map((b) => this._normalizeBar(b, symbol, assetType, timeframe, "us"));
     }
-    const data = await this._get(`/v2/stocks/${encodeURIComponent(symbol)}/bars`, { timeframe, start, end, limit, feed, adjustment: "raw" });
+    const data = await this._get(`/v2/stocks/${encodeURIComponent(symbol)}/bars`, { timeframe, start: effectiveStart, end, limit, feed, adjustment: "raw" });
     const raw = data.bars || [];
     return raw.map((b) => this._normalizeBar(b, symbol, assetType, timeframe, feed));
+  }
+
+  /**
+   * Generous, deliberately-padded lookback window so `limit` real bars are always
+   * findable even across weekends/holidays. Crypto trades 24/7 so needs no weekend
+   * padding; stocks get roughly 40% extra calendar days plus a flat 10-day margin for
+   * holidays and thin trading days.
+   */
+  _computeDefaultStart(timeframe, limit, assetType) {
+    const barsPerTradingDay = { "1Min": 390, "5Min": 78, "15Min": 26, "1Hour": 7, "1Day": 1 };
+    const perDay = barsPerTradingDay[timeframe] || 1;
+    const tradingPeriodsNeeded = Math.ceil(limit / perDay);
+    const calendarDaysBack = assetType === "crypto"
+      ? tradingPeriodsNeeded + 2
+      : Math.ceil(tradingPeriodsNeeded * 1.4) + 10;
+    return new Date(Date.now() - calendarDaysBack * 24 * 60 * 60 * 1000).toISOString();
   }
 
   async getLatestSnapshot({ symbol, assetType, feed = "iex" }) {
