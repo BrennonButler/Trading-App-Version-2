@@ -166,7 +166,7 @@ function createApp({ dbPath, stockWsUrls, cryptoWsUrl } = {}) {
     if (!primary) {
       if (isMarketOverviewRequest(message)) {
         try {
-                    const payload = await buildMarketOverviewPayload({ restClient, newsClient, feed: config.alpaca.stockFeed, horizon, keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
+          const payload = await buildMarketOverviewPayload({ restClient, newsClient, feed: config.alpaca.stockFeed, horizon, keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
           const { reply } = await runAnalysis({
             payload, userQuestion: message, conversationHistory: session.history, horizon,
             apiKey: config.anthropic.apiKey, model: config.anthropic.model,
@@ -189,7 +189,7 @@ function createApp({ dbPath, stockWsUrls, cryptoWsUrl } = {}) {
     const secondSymbol = isComparison ? extractComparisonSymbol(message, primary.symbol) : null;
 
     try {
-            const payloadOpts = { restClient, newsClient, feed: config.alpaca.stockFeed, horizon, keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey };
+      const payloadOpts = { restClient, newsClient, feed: config.alpaca.stockFeed, horizon, keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey };
       const primaryPayload = await buildAnalysisPayload({ symbol: primary.symbol, assetType: primary.assetType, indexNote: primary.indexNote, ...payloadOpts });
 
       let payload = primaryPayload;
