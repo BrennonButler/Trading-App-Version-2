@@ -5,13 +5,18 @@ const { rateLimitedFetch } = require("./rateLimiter.js");
  * Alpaca Assets API client - the full list of tradable US assets (thousands of stocks/ETFs),
  * used to power real autocomplete/validation instead of guessing from a hardcoded subset.
  *
- * IMPORTANT: this lives on Alpaca's TRADING API (api.alpaca.markets), NOT the Market Data
- * API (data.alpaca.markets) that alpacaRestClient/alpacaFeedClient/alpacaNewsClient use -
- * same credentials, different base URL. This is reference data (what's listed/tradable),
- * not live pricing, which is why it's a separate client rather than bolted onto those.
+ * IMPORTANT: this lives on Alpaca's TRADING API, NOT the Market Data API
+ * (data.alpaca.markets) that alpacaRestClient/alpacaFeedClient/alpacaNewsClient use - same
+ * credentials, different base URL. This is reference data (what's listed/tradable), not
+ * live pricing, which is why it's a separate client rather than bolted onto those.
+ *
+ * This app is paper-trading throughout, and paper API keys only authorize against Alpaca's
+ * paper-trading host (paper-api.alpaca.markets) - the live host (api.alpaca.markets) returns
+ * a 401 for paper keys even though the same keys work fine on data.alpaca.markets, since
+ * market data access isn't split by trading mode the way the trading API is.
  */
 class AlpacaAssetsClient {
-  constructor({ keyId, secretKey, baseUrl = "https://api.alpaca.markets" }) {
+  constructor({ keyId, secretKey, baseUrl = "https://paper-api.alpaca.markets" }) {
     this.keyId = keyId;
     this.secretKey = secretKey;
     this.baseUrl = baseUrl;
