@@ -193,13 +193,41 @@ PAGE_RENDERERS.backtest = async function () {
 PAGE_RENDERERS.settings = async function () {
   const el = document.getElementById('page-settings');
   const s = App.settings;
+  const rl = s.riskLimits || {};
   el.innerHTML = `
     <div class="card mb-16">
       <div class="card-title">Symbols to watch</div>
       <div class="form-group"><label class="form-label">Crypto (comma-separated)</label><input type="text" id="set-crypto" class="form-input" value="${escapeHtml(s.cryptoSymbols.join(', '))}"></div>
       <div class="form-group"><label class="form-label">Stocks (comma-separated)</label><textarea id="set-stocks" class="form-input" rows="3">${escapeHtml(s.stockSymbols.join(', '))}</textarea></div>
-      <button class="btn btn-primary" id="save-settings-btn">Save</button>
     </div>
+    <div class="card mb-16">
+      <div class="card-title">Risk Limits</div>
+      <p class="text-mid mb-16" style="font-size:13px;line-height:1.5;">
+        These guard your paper portfolio against outsized single trades or a bad stretch
+        compounding - the same limits the app already enforces server-side, now editable.
+      </p>
+      <div class="form-group">
+        <label class="form-label">Max risk per trade (%)</label>
+        <input type="number" id="set-risk-per-trade" class="form-input" value="${rl.maxRiskPerTradePct ?? 1.0}" min="0.1" max="100" step="0.1">
+        <div class="form-hint">How much of your total equity one single trade's stop-loss is allowed to risk.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Max daily loss (%)</label>
+        <input type="number" id="set-max-daily-loss" class="form-input" value="${rl.maxDailyLossPct ?? 3.0}" min="0.1" max="100" step="0.1">
+        <div class="form-hint">If losses in a single day reach this share of equity, new positions stop opening until the next day.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Max portfolio exposure (%)</label>
+        <input type="number" id="set-max-exposure" class="form-input" value="${rl.maxPortfolioExposurePct ?? 50.0}" min="1" max="100" step="1">
+        <div class="form-hint">The largest share of your total equity allowed to be deployed in open positions at once.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Max open positions</label>
+        <input type="number" id="set-max-positions" class="form-input" value="${rl.maxOpenPositions ?? 5}" min="1" max="50" step="1">
+        <div class="form-hint">The most positions allowed open at the same time, regardless of available cash.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary mb-16" id="save-settings-btn">Save settings</button>
     <div class="card">
       <div class="card-title">Connection</div>
       <div id="status-details" class="text-mid" style="font-size:13px;">Loading…</div>
@@ -214,8 +242,14 @@ PAGE_RENDERERS.settings = async function () {
   document.getElementById('save-settings-btn').addEventListener('click', async () => {
     const cryptoSymbols = document.getElementById('set-crypto').value.split(',').map(s => s.trim()).filter(Boolean);
     const stockSymbols = document.getElementById('set-stocks').value.split(',').map(s => s.trim()).filter(Boolean);
-    await API.saveSettings({ cryptoSymbols, stockSymbols });
-    App.settings.cryptoSymbols = cryptoSymbols; App.settings.stockSymbols = stockSymbols;
+    const riskLimits = {
+      maxRiskPerTradePct: parseFloat(document.getElementById('set-risk-per-trade').value) || 1.0,
+      maxDailyLossPct: parseFloat(document.getElementById('set-max-daily-loss').value) || 3.0,
+      maxPortfolioExposurePct: parseFloat(document.getElementById('set-max-exposure').value) || 50.0,
+      maxOpenPositions: parseInt(document.getElementById('set-max-positions').value, 10) || 5,
+    };
+    await API.saveSettings({ cryptoSymbols, stockSymbols, riskLimits });
+    App.settings.cryptoSymbols = cryptoSymbols; App.settings.stockSymbols = stockSymbols; App.settings.riskLimits = riskLimits;
     toast('Saved', 'success');
   });
 };
