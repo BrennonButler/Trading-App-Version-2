@@ -1,5 +1,6 @@
 "use strict";
 const { rateLimitedFetch } = require("./rateLimiter.js");
+const { barsCache } = require("./cache.js");
 
 /**
  * Alpaca REST market-data client (historical bars). Auth via headers, never query params,
@@ -48,21 +49,28 @@ class AlpacaRestClient {
    *   volume, timestamp, timeframe, source:'alpaca', feed }]
    */
   async getHistoricalBars({ symbol, assetType, timeframe = "1Day", start, end, limit = 300, feed = "iex" }) {
-    // Alpaca's bars endpoint can return an empty result when no start is given and "now"
-    // falls on a non-trading window (e.g. a weekend, or after-hours before any bar has
-    // formed) - it does not automatically walk backward to find the most recent real
-    // trading data. Always supply an explicit, generous start so real bars are found
-    // regardless of what day/time it currently is. This does not risk returning MORE
-    // than asked for - Alpaca still respects `limit` as a hard cap.
-    const effectiveStart = start || this._computeDefaultStart(timeframe, limit, assetType);
-    if (assetType === "crypto") {
-      const data = await this._get("/v1beta3/crypto/us/bars", { symbols: symbol, timeframe, start: effectiveStart, end, limit });
-      const raw = (data.bars && data.bars[symbol]) || [];
-      return raw.map((b) => this._normalizeBar(b, symbol, assetType, timeframe, "us"));
-    }
-    const data = await this._get(`/v2/stocks/${encodeURIComponent(symbol)}/bars`, { timeframe, start: effectiveStart, end, limit, feed, adjustment: "raw" });
-    const raw = data.bars || [];
-    return raw.map((b) => this._normalizeBar(b, symbol, assetType, timeframe, feed));
+    // Cached per exact (symbol, timeframe, start, end, limit, feed) combination - the
+    // Scanner, AI Analyst, and Backtest all fetch bars for the same symbols independently,
+    // often seconds apart, so this avoids re-hitting Alpaca for data that hasn't changed.
+    const cacheKey = `${symbol}|${assetType}|${timeframe}|${start || ""}|${end || ""}|${limit}|${feed}`;
+    const bars = await barsCache.getOrFetch(cacheKey, async () => {
+      // Alpaca's bars endpoint can return an empty result when no start is given and "now"
+      // falls on a non-trading window (e.g. a weekend, or after-hours before any bar has
+      // formed) - it does not automatically walk backward to find the most recent real
+      // trading data. Always supply an explicit, generous start so real bars are found
+      // regardless of what day/time it currently is. This does not risk returning MORE
+      // than asked for - Alpaca still respects `limit` as a hard cap.
+      const effectiveStart = start || this._computeDefaultStart(timeframe, limit, assetType);
+      if (assetType === "crypto") {
+        const data = await this._get("/v1beta3/crypto/us/bars", { symbols: symbol, timeframe, start: effectiveStart, end, limit });
+        const raw = (data.bars && data.bars[symbol]) || [];
+        return raw.map((b) => this._normalizeBar(b, symbol, assetType, timeframe, "us"));
+      }
+      const data = await this._get(`/v2/stocks/${encodeURIComponent(symbol)}/bars`, { timeframe, start: effectiveStart, end, limit, feed, adjustment: "raw" });
+      const raw = data.bars || [];
+      return raw.map((b) => this._normalizeBar(b, symbol, assetType, timeframe, feed));
+    });
+    return bars.slice(); // shallow copy - the cached array itself must never be mutated by a caller
   }
 
   /**
