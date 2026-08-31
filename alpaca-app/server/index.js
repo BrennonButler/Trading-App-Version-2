@@ -15,6 +15,7 @@ const { analyzeSymbol } = require("./services/analyst.js");
 const { extractSymbol, extractComparisonSymbol, buildAnalysisPayload, isMarketOverviewRequest, buildMarketOverviewPayload } = require("./services/analysisPayload.js");
 const { runAnalysis } = require("./services/aiReasoningEngine.js");
 const { AlpacaNewsClient } = require("./services/alpacaNewsClient.js");
+const { getMarketStatus } = require("./services/marketHours.js");
 const {
   createInitialState, getOpenPositions, getPortfolioValue, openPosition, closePosition, checkStopsAndTargets, RiskLimitExceeded,
 } = require("./lib/paper_trading_engine.js");
@@ -80,6 +81,21 @@ function createApp({ dbPath, stockWsUrls, cryptoWsUrl } = {}) {
       stockFeed: config.alpaca.stockFeed,
       connection: marketData.getConnectionStatus(),
     });
+  });
+
+  // Exposes real, holiday-aware market status directly - useful on its own (the frontend
+  // can show *why* the market is closed, not just that it is) and confirms the real Alpaca
+  // calendar lookup is actually succeeding rather than silently falling back to the
+  // weekday-only heuristic (marketStatus.note is null on a genuine calendar hit, and set to
+  // an explicit disclosure string when it fell back).
+  app.get("/api/market-status", async (req, res) => {
+    const assetType = req.query.assetType === "crypto" ? "crypto" : "stock";
+    try {
+      const status = await getMarketStatus(assetType, new Date(), { keyId: config.alpaca.keyId, secretKey: config.alpaca.secretKey });
+      res.json(status);
+    } catch (e) {
+      res.status(502).json({ error: e.message });
+    }
   });
 
   app.get("/api/snapshot/:assetType/:symbol", (req, res) => {
