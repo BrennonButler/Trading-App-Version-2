@@ -65,14 +65,14 @@ const HORIZON_CONFIG = {
   long_term: { dailyBarsForContext: 260, hourlyBarLookbackHours: 48, primaryTimeframeLabel: "daily/structural (up to 260 trading days)" },
 };
 
-async function buildAnalysisPayload({ symbol, assetType, restClient, newsClient, feed, indexNote, horizon = "short_term" }) {
+async function buildAnalysisPayload({ symbol, assetType, restClient, newsClient, feed, indexNote, horizon = "short_term", keyId, secretKey }) {
   const horizonCfg = HORIZON_CONFIG[horizon] || HORIZON_CONFIG.short_term;
   const payload = {
     asset: symbol, assetType, horizon, timestamps: {}, sources: [], warnings: [],
     currentPrice: null, priceChange: null, volume: null, indicators: null,
     historicalDataAvailable: { daily: false, hourly: false },
     news: [], fundamentals: null, indexNote: indexNote || null, scorecard: null,
-    marketStatus: getMarketStatus(assetType),
+    marketStatus: await getMarketStatus(assetType, new Date(), { keyId, secretKey }),
     dataType: "historical", // upgraded to "live" below if a fresh snapshot is available
   };
 
@@ -190,12 +190,12 @@ function isMarketOverviewRequest(message) {
   return MARKET_OVERVIEW_PATTERN.test(message);
 }
 
-async function buildMarketOverviewPayload({ restClient, newsClient, feed, horizon }) {
+async function buildMarketOverviewPayload({ restClient, newsClient, feed, horizon, keyId, secretKey }) {
   const assets = [];
   const errors = [];
   for (const { symbol, assetType, label } of MARKET_OVERVIEW_SYMBOLS) {
     try {
-      const payload = await buildAnalysisPayload({ symbol, assetType, restClient, newsClient, feed, horizon });
+      const payload = await buildAnalysisPayload({ symbol, assetType, restClient, newsClient, feed, horizon, keyId, secretKey });
       assets.push({ label, ...payload });
     } catch (e) {
       errors.push(`${label}: ${e.message}`);
